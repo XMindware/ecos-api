@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Prompt;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 
 class PromptController extends Controller
 {
@@ -72,10 +73,15 @@ class PromptController extends Controller
         $language = trim((string) $request->get('language', 'en'));
         $category = trim((string) $request->get('category', ''));
         $keyword = trim((string) $request->get('keyword', ''));
+        $minor = $request->query('minor');
 
         return Prompt::query()
             ->where('is_active', true)
             ->where('language', $language)
+            ->when(
+                $minor !== null && Schema::hasColumn('prompts', 'is_minor'),
+                fn (Builder $query) => $query->where('is_minor', $request->boolean('minor'))
+            )
             ->when(! $ignoreCategory && $category !== '', function (Builder $query) use ($category) {
                 $query->whereHas('category', function (Builder $q) use ($category) {
                     $q->where('slug', $category)

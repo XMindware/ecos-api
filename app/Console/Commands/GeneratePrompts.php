@@ -23,7 +23,8 @@ class GeneratePrompts extends Command
     protected $signature = 'ecos:generate-prompts
                             {category}
                             {language=en}
-                            {--count=10}';
+                            {--count=10}
+                            {--minor}';
 
     /**
      * The console command description.
@@ -52,15 +53,17 @@ class GeneratePrompts extends Command
         $categoryInput = (string) $this->argument('category');
         $language = (string) $this->argument('language');
         $count = max(1, (int) $this->option('count'));
+        $minor = (bool) $this->option('minor');
+        $audienceLabel = $minor ? 'minor' : 'general/adult';
 
-        $this->info("Generating {$count} prompts for category '{$categoryInput}' ({$language})...");
+        $this->info("Generating {$count} prompts for category '{$categoryInput}' ({$language}, {$audienceLabel})...");
 
         try {
-            $systemPrompt = $promptGenerator->buildSystemPrompt($categoryInput, $language, $count);
+            $systemPrompt = $promptGenerator->buildSystemPrompt($categoryInput, $language, $count, $minor);
             $rawResponse = $openAIService->generateStructuredPrompts($systemPrompt);
             $generated = $promptGenerator->generateForCategory($categoryInput, $rawResponse, $count);
 
-            $summary = DB::transaction(function () use ($categoryInput, $language, $generated) {
+            $summary = DB::transaction(function () use ($categoryInput, $language, $generated, $minor) {
                 $category = $this->upsertCategory($categoryInput);
 
                 $promptCreated = 0;
@@ -70,7 +73,7 @@ class GeneratePrompts extends Command
                 $keywordLinks = 0;
 
                 foreach ($generated['prompts'] as $payload) {
-                    [$prompt, $wasCreated] = $this->upsertPrompt($category, $language, $payload);
+                    [$prompt, $wasCreated] = $this->upsertPrompt($category, $language, $payload, $minor);
                     $wasCreated ? $promptCreated++ : $promptUpdated++;
 
                     [$keywordIds, $createdCount, $reusedCount] = $this->resolveKeywordIds($payload['keywords'] ?? []);
@@ -83,6 +86,7 @@ class GeneratePrompts extends Command
 
                 return [
                     'category' => $category,
+                    'minor' => $minor,
                     'prompts_created' => $promptCreated,
                     'prompts_updated' => $promptUpdated,
                     'keywords_created' => $keywordCreated,
@@ -101,6 +105,7 @@ class GeneratePrompts extends Command
         $this->info('Prompt generation complete.');
         $this->line('Summary:');
         $this->line(' - Category: '.$summary['category']->name.' (slug: '.$summary['category']->slug.')');
+        $this->line(' - Audience: '.($summary['minor'] ? 'minor' : 'general/adult'));
         $this->line(' - Generated: '.$summary['generated_count']);
         $this->line(' - Prompts created: '.$summary['prompts_created']);
         $this->line(' - Prompts updated: '.$summary['prompts_updated']);
@@ -163,15 +168,20 @@ class GeneratePrompts extends Command
      * @param  array<string, mixed>  $payload
      * @return array{0: Prompt, 1: bool}
      */
-    protected function upsertPrompt(Category $category, string $language, array $payload): array
+    protected function upsertPrompt(Category $category, string $language, array $payload, bool $minor = false): array
     {
         $text = (string) ($payload['text'] ?? '');
 
-        $prompt = Prompt::query()
+        $query = Prompt::query()
             ->where('category_id', $category->id)
             ->where('language', $language)
-            ->where('text', $text)
-            ->first() ?? new Prompt();
+            ->where('text', $text);
+
+        if (Schema::hasColumn('prompts', 'is_minor')) {
+            $query->where('is_minor', $minor);
+        }
+
+        $prompt = $query->first() ?? new Prompt();
 
         $wasCreated = ! $prompt->exists;
         $prompt->category_id = $category->id;
@@ -188,6 +198,10 @@ class GeneratePrompts extends Command
 
         if (Schema::hasColumn('prompts', 'is_active')) {
             $prompt->is_active = true;
+        }
+
+        if (Schema::hasColumn('prompts', 'is_minor')) {
+            $prompt->is_minor = $minor;
         }
 
         $prompt->save();

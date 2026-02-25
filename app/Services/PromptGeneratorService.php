@@ -7,7 +7,7 @@ use InvalidArgumentException;
 
 class PromptGeneratorService
 {
-    public function buildSystemPrompt(string $category, string $language = 'en', int $count = 10): string
+    public function buildSystemPrompt(string $category, string $language = 'en', int $count = 10, bool $minor = false): string
     {
         $category = trim($category);
         $language = trim($language);
@@ -21,10 +21,12 @@ class PromptGeneratorService
         }
 
         $languageInstruction = $this->buildLanguageInstruction($language);
+        $audienceInstruction = $this->buildAudienceInstruction($minor);
 
         return <<<PROMPT
 Generate {$count} reflective memory prompts about {$category}.
 {$languageInstruction}
+{$audienceInstruction}
 Each prompt should:
 - use simple, clear language
 - focus on one concrete anecdote or moment
@@ -44,6 +46,15 @@ Return JSON:
   ]
 }
 PROMPT;
+    }
+
+    protected function buildAudienceInstruction(bool $minor): string
+    {
+        if (! $minor) {
+            return 'Target adults and general audiences. Avoid child-specific framing unless naturally relevant.';
+        }
+
+        return 'Target kids/minors. Use kid-friendly language and safe topics (for example: cartoons they like, games, school moments, friends, family fun, hobbies, and things they want to do). Avoid adult themes, romance, violence, fear-heavy topics, alcohol/drugs, and trauma-focused questions.';
     }
 
     protected function buildLanguageInstruction(string $language): string
