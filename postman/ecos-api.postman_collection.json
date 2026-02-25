@@ -1,0 +1,144 @@
+{
+  "info": {
+    "_postman_id": "d2d4f2b7-4c6c-4e0b-8a70-7b0d8f2f2c01",
+    "name": "ECOS API",
+    "description": "Postman collection for the current ECOS API routes. Note: `GET /api/prompts/search` is registered but may fail until `PromptController::search()` is implemented.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "language",
+      "value": "en"
+    },
+    {
+      "key": "category",
+      "value": "childhood"
+    },
+    {
+      "key": "q",
+      "value": "school memories"
+    }
+  ],
+  "item": [
+    {
+      "name": "Prompts",
+      "item": [
+        {
+          "name": "Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/categories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            },
+            "description": "List active categories."
+          },
+          "response": []
+        },
+        {
+          "name": "Random Prompt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/prompts/random?language={{language}}&category={{category}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prompts",
+                "random"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "{{language}}"
+                },
+                {
+                  "key": "category",
+                  "value": "{{category}}",
+                  "description": "Optional category slug filter"
+                }
+              ]
+            },
+            "description": "Fetch one random active prompt by language, optionally filtered by category slug."
+          },
+          "response": []
+        },
+        {
+          "name": "Prompts By Category",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/prompts/by-category?language={{language}}&category={{category}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prompts",
+                "by-category"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "{{language}}"
+                },
+                {
+                  "key": "category",
+                  "value": "{{category}}",
+                  "description": "Required category slug"
+                }
+              ]
+            },
+            "description": "List prompts by category slug and language."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Prompts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/prompts/search?q={{q}}&language={{language}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prompts",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{q}}"
+                },
+                {
+                  "key": "language",
+                  "value": "{{language}}"
+                }
+              ]
+            },
+            "description": "Search prompts (route exists; implementation may still be pending)."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
