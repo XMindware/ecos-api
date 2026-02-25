@@ -54,7 +54,7 @@ PROMPT;
             return 'Target adults and general audiences. Avoid child-specific framing unless naturally relevant.';
         }
 
-        return 'Target kids/minors. Use kid-friendly language and safe topics (for example: cartoons they like, games, school moments, friends, family fun, hobbies, and things they want to do). Avoid adult themes, romance, violence, fear-heavy topics, alcohol/drugs, and trauma-focused questions.';
+        return 'Target kids/minors. Use simple, natural language that is easy for a minor to understand, but do not sound childish, babyish, or patronizing. Keep the tone warm and respectful. Use safe topics (for example: games, school moments, friends, family fun, hobbies, favorite activities, and things they want to learn or do). Avoid adult themes, romance, violence, fear-heavy topics, alcohol/drugs, and trauma-focused questions.';
     }
 
     protected function buildLanguageInstruction(string $language): string
