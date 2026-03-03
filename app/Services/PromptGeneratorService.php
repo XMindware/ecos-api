@@ -22,11 +22,13 @@ class PromptGeneratorService
 
         $languageInstruction = $this->buildLanguageInstruction($language);
         $audienceInstruction = $this->buildAudienceInstruction($minor);
+        $timeInstruction = $this->buildTimeInstruction($minor);
 
         return <<<PROMPT
 Generate {$count} reflective memory prompts about {$category}.
 {$languageInstruction}
 {$audienceInstruction}
+{$timeInstruction}
 Each prompt should:
 - use simple, clear language
 - focus on one concrete anecdote or moment
@@ -46,6 +48,15 @@ Return JSON:
   ]
 }
 PROMPT;
+    }
+
+    protected function buildTimeInstruction(bool $minor): string
+    {
+        if (! $minor) {
+            return 'For adults/general audiences, prompts may use present-time or past-time framing.';
+        }
+
+        return 'Use present-time framing only. Ask about what they like, dislike, do, think, or feel now. Do not ask about distant past memories.';
     }
 
     protected function buildAudienceInstruction(bool $minor): string
