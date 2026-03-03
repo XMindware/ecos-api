@@ -9,6 +9,7 @@ use App\Models\PromptEvent;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Throwable;
@@ -136,6 +137,8 @@ class PromptController extends Controller
             [],
             $context
         );
+
+        $this->logPromptOutcome($prompt, $eventName, $event->request_uuid, $context);
 
         return response()->json([
             'message' => 'Prompt outcome registered.',
@@ -324,6 +327,7 @@ class PromptController extends Controller
                 $this->createPromptEvent($request, $requestUuid, $endpoint, 'served', $result->id, $filters, array_merge($extraContext, [
                     'result_count' => 1,
                 ]));
+                $this->logPromptDelivery($endpoint, $requestUuid, collect([$result]), $filters, $extraContext);
 
                 return;
             }
@@ -340,6 +344,10 @@ class PromptController extends Controller
                         'result_count' => $count,
                     ]));
                 }
+
+                $this->logPromptDelivery($endpoint, $requestUuid, $result, $filters, array_merge($extraContext, [
+                    'result_count' => $count,
+                ]));
 
                 return;
             }
@@ -387,6 +395,43 @@ class PromptController extends Controller
     protected function countEvents(Builder $query, array $events): int
     {
         return (clone $query)->whereIn('event', $events)->count();
+    }
+
+    protected function logPromptDelivery(
+        string $endpoint,
+        string $requestUuid,
+        EloquentCollection $prompts,
+        array $filters,
+        array $context = []
+    ): void {
+        Log::info('Prompts sent to app.', [
+            'endpoint' => $endpoint,
+            'request_uuid' => $requestUuid,
+            'prompt_ids' => $prompts->pluck('id')->values()->all(),
+            'prompts' => $prompts->map(fn (Prompt $prompt) => [
+                'id' => $prompt->id,
+                'text' => $prompt->text,
+                'language' => $prompt->language,
+                'category' => $prompt->category?->slug,
+            ])->values()->all(),
+            'filters' => $filters,
+            'context' => $context,
+        ]);
+    }
+
+    protected function logPromptOutcome(Prompt $prompt, string $event, string $requestUuid, array $context = []): void
+    {
+        Log::info("Prompt {$event} by app.", [
+            'event' => $event,
+            'request_uuid' => $requestUuid,
+            'prompt' => [
+                'id' => $prompt->id,
+                'text' => $prompt->text,
+                'language' => $prompt->language,
+                'category' => $prompt->category?->slug,
+            ],
+            'context' => $context,
+        ]);
     }
 
     protected function applyDateRange(Builder $query, array $validated): Builder
