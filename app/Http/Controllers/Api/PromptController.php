@@ -18,6 +18,12 @@ class PromptController extends Controller
     public function random(Request $request)
     {
         $fallbackUsed = false;
+        $requestUuid = (string) Str::uuid();
+
+        $this->logPromptRequest($request, 'random', $requestUuid, [
+            'fallback_possible' => $request->filled('category'),
+        ]);
+
         $prompt = $this->randomPromptFromQuery($this->filteredPromptQuery($request), $request);
 
         if ($prompt === null && $request->filled('category')) {
@@ -28,11 +34,13 @@ class PromptController extends Controller
             $fallbackUsed = $prompt !== null;
         }
 
-        $this->logPromptEvents($request, 'random', $prompt, [
+        $this->logPromptEvents($request, 'random', $requestUuid, $prompt, [
             'fallback_used' => $fallbackUsed,
         ]);
 
-        return $prompt;
+        return response()
+            ->json($prompt)
+            ->header('X-Prompt-Request-Id', $requestUuid);
     }
 
     public function byCategory(Request $request)
@@ -45,14 +53,19 @@ class PromptController extends Controller
             ], 422);
         }
 
+        $requestUuid = (string) Str::uuid();
+        $this->logPromptRequest($request, 'by-category', $requestUuid);
+
         $prompts = $this->filteredPromptQuery($request)
             ->with(['category', 'keywords'])
             ->latest('id')
             ->get();
 
-        $this->logPromptEvents($request, 'by-category', $prompts);
+        $this->logPromptEvents($request, 'by-category', $requestUuid, $prompts);
 
-        return $prompts;
+        return response()
+            ->json($prompts)
+            ->header('X-Prompt-Request-Id', $requestUuid);
     }
 
     public function categories()
@@ -64,6 +77,12 @@ class PromptController extends Controller
     {
         $term = trim((string) $request->get('q', ''));
         $limit = min(100, max(1, (int) $request->get('limit', 20)));
+        $requestUuid = (string) Str::uuid();
+
+        $this->logPromptRequest($request, 'search', $requestUuid, [
+            'limit' => $limit,
+            'term' => $term,
+        ]);
 
         $query = $this->filteredPromptQuery($request)
             ->with(['category', 'keywords']);
@@ -81,12 +100,143 @@ class PromptController extends Controller
             ->limit($limit)
             ->get();
 
-        $this->logPromptEvents($request, 'search', $prompts, [
+        $this->logPromptEvents($request, 'search', $requestUuid, $prompts, [
             'limit' => $limit,
             'term' => $term,
         ]);
 
-        return $prompts;
+        return response()
+            ->json($prompts)
+            ->header('X-Prompt-Request-Id', $requestUuid);
+    }
+
+    public function registerOutcome(Request $request, Prompt $prompt)
+    {
+        $validated = $request->validate([
+            'event' => ['required', 'in:used,discarded'],
+            'request_uuid' => ['nullable', 'uuid'],
+            'video_id' => ['nullable', 'integer'],
+            'context' => ['nullable', 'array'],
+        ]);
+
+        $context = array_merge($validated['context'] ?? [], array_filter([
+            'video_id' => $validated['video_id'] ?? null,
+        ], fn ($value) => $value !== null));
+
+        $event = $this->createPromptEvent(
+            $request,
+            $validated['request_uuid'] ?? (string) Str::uuid(),
+            'feedback',
+            $validated['event'],
+            $prompt->id,
+            [],
+            $context
+        );
+
+        return response()->json([
+            'message' => 'Prompt outcome registered.',
+            'data' => $event,
+        ], 201);
+    }
+
+    public function analytics(Request $request)
+    {
+        $validated = $request->validate([
+            'category' => ['nullable', 'string'],
+            'language' => ['nullable', 'string', 'max:10'],
+            'minor' => ['nullable', 'boolean'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $limit = (int) ($validated['limit'] ?? 20);
+        $promptBaseQuery = Prompt::query()
+            ->with(['category', 'keywords'])
+            ->when(! empty($validated['category']), function (Builder $query) use ($validated) {
+                $query->whereHas('category', function (Builder $categoryQuery) use ($validated) {
+                    $categoryQuery->where('slug', $validated['category']);
+                });
+            })
+            ->when(! empty($validated['language']), fn (Builder $query) => $query->where('language', $validated['language']))
+            ->when(
+                array_key_exists('minor', $validated) && Schema::hasColumn('prompts', 'is_minor'),
+                fn (Builder $query) => $query->where('is_minor', (bool) $validated['minor'])
+            );
+
+        $promptEventBaseQuery = $this->applyDateRange(PromptEvent::query(), $validated)
+            ->whereIn('prompt_id', (clone $promptBaseQuery)->select('prompts.id'));
+
+        $requestEventBaseQuery = $this->applyAnalyticsRequestFilters(
+            $this->applyDateRange(PromptEvent::query(), $validated),
+            $validated
+        );
+
+        $promptAnalytics = (clone $promptBaseQuery)
+            ->select('prompts.*')
+            ->selectSub($this->countEventsSubquery('served', $promptEventBaseQuery), 'times_requested')
+            ->selectSub($this->countEventsSubquery('used', $promptEventBaseQuery), 'times_used')
+            ->selectSub($this->countEventsSubquery('discarded', $promptEventBaseQuery), 'times_discarded')
+            ->orderByDesc('times_used')
+            ->orderByDesc('times_requested')
+            ->limit($limit)
+            ->get()
+            ->map(function (Prompt $prompt) {
+                $requested = (int) $prompt->times_requested;
+                $used = (int) $prompt->times_used;
+                $discarded = (int) $prompt->times_discarded;
+
+                return [
+                    'id' => $prompt->id,
+                    'text' => $prompt->text,
+                    'language' => $prompt->language,
+                    'tone' => $prompt->tone,
+                    'difficulty' => $prompt->difficulty,
+                    'category' => $prompt->category?->only(['id', 'name', 'slug']),
+                    'keywords' => $prompt->keywords->pluck('slug')->values(),
+                    'times_requested' => $requested,
+                    'times_used' => $used,
+                    'times_discarded' => $discarded,
+                    'usage_rate' => $requested > 0 ? round(($used / $requested) * 100, 2) : 0.0,
+                    'discard_rate' => $requested > 0 ? round(($discarded / $requested) * 100, 2) : 0.0,
+                ];
+            })
+            ->values();
+
+        $categoryAnalytics = $promptAnalytics
+            ->groupBy('category.slug')
+            ->map(function ($prompts) {
+                $first = $prompts->first();
+                $requested = $prompts->sum('times_requested');
+                $used = $prompts->sum('times_used');
+                $discarded = $prompts->sum('times_discarded');
+
+                return [
+                    'id' => $first['category']['id'] ?? null,
+                    'name' => $first['category']['name'] ?? null,
+                    'slug' => $first['category']['slug'] ?? null,
+                    'prompt_count' => $prompts->count(),
+                    'times_requested' => $requested,
+                    'times_used' => $used,
+                    'times_discarded' => $discarded,
+                    'usage_rate' => $requested > 0 ? round(($used / $requested) * 100, 2) : 0.0,
+                    'discard_rate' => $requested > 0 ? round(($discarded / $requested) * 100, 2) : 0.0,
+                ];
+            })
+            ->sortByDesc('times_used')
+            ->values();
+
+        return response()->json([
+            'summary' => [
+                'request_count' => (clone $requestEventBaseQuery)->where('event', 'requested')->count(),
+                'served_count' => (clone $promptEventBaseQuery)->where('event', 'served')->count(),
+                'used_count' => (clone $promptEventBaseQuery)->where('event', 'used')->count(),
+                'discarded_count' => (clone $promptEventBaseQuery)->where('event', 'discarded')->count(),
+                'no_result_count' => (clone $requestEventBaseQuery)->where('event', 'no_results')->count(),
+            ],
+            'top_prompts' => $promptAnalytics,
+            'categories' => $categoryAnalytics,
+        ]);
     }
 
     protected function filteredPromptQuery(Request $request, bool $ignoreCategory = false): Builder
@@ -131,14 +281,34 @@ class PromptController extends Controller
         return $prompt;
     }
 
-    protected function logPromptEvents(Request $request, string $endpoint, Prompt|EloquentCollection|null $result, array $extraContext = []): void
+    protected function logPromptRequest(Request $request, string $endpoint, string $requestUuid, array $context = []): void
     {
         if (! Schema::hasTable('prompt_events')) {
             return;
         }
 
         try {
-            $requestUuid = (string) Str::uuid();
+            $this->createPromptEvent(
+                $request,
+                $requestUuid,
+                $endpoint,
+                'requested',
+                null,
+                $this->promptEventFilters($request),
+                $context
+            );
+        } catch (Throwable) {
+            // Do not fail the API response if event logging fails.
+        }
+    }
+
+    protected function logPromptEvents(Request $request, string $endpoint, string $requestUuid, Prompt|EloquentCollection|null $result, array $extraContext = []): void
+    {
+        if (! Schema::hasTable('prompt_events')) {
+            return;
+        }
+
+        try {
             $filters = $this->promptEventFilters($request);
 
             if ($result instanceof Prompt) {
@@ -181,8 +351,8 @@ class PromptController extends Controller
         ?int $promptId,
         array $filters,
         array $context
-    ): void {
-        PromptEvent::create([
+    ): PromptEvent {
+        return PromptEvent::create([
             'request_uuid' => $requestUuid,
             'endpoint' => $endpoint,
             'event' => $event,
@@ -192,6 +362,30 @@ class PromptController extends Controller
             'ip_address' => $request->ip(),
             'user_agent' => Str::limit((string) $request->userAgent(), 1024, ''),
         ]);
+    }
+
+    protected function countEventsSubquery(string $event, Builder $eventBaseQuery): \Illuminate\Database\Query\Builder
+    {
+        return (clone $eventBaseQuery)
+            ->toBase()
+            ->selectRaw('COUNT(*)')
+            ->whereColumn('prompt_events.prompt_id', 'prompts.id')
+            ->where('prompt_events.event', $event);
+    }
+
+    protected function applyDateRange(Builder $query, array $validated): Builder
+    {
+        return $query
+            ->when(! empty($validated['from']), fn (Builder $builder) => $builder->where('created_at', '>=', $validated['from']))
+            ->when(! empty($validated['to']), fn (Builder $builder) => $builder->where('created_at', '<=', $validated['to']));
+    }
+
+    protected function applyAnalyticsRequestFilters(Builder $query, array $validated): Builder
+    {
+        return $query
+            ->when(! empty($validated['category']), fn (Builder $builder) => $builder->where('filters->category', $validated['category']))
+            ->when(! empty($validated['language']), fn (Builder $builder) => $builder->where('filters->language', $validated['language']))
+            ->when(array_key_exists('minor', $validated), fn (Builder $builder) => $builder->where('filters->minor', (bool) $validated['minor']));
     }
 
     protected function promptEventFilters(Request $request): array

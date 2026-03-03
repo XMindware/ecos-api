@@ -123,4 +123,8 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'client_private_key' => env('APP_CLIENT_PRIVATE_KEY'),
+
+    'client_private_key_header' => env('APP_CLIENT_PRIVATE_KEY_HEADER', 'X-App-Private-Key'),
+
 ];
