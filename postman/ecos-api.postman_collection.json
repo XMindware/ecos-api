@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "d2d4f2b7-4c6c-4e0b-8a70-7b0d8f2f2c01",
     "name": "ECOS API",
-    "description": "Postman collection for the current ECOS API routes. Note: `GET /api/prompts/search` is registered but may fail until `PromptController::search()` is implemented.",
+    "description": "Postman collection for the current ECOS API routes. All API endpoints require the application private key header.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -21,6 +21,22 @@
     {
       "key": "q",
       "value": "school memories"
+    },
+    {
+      "key": "app_private_key",
+      "value": ""
+    },
+    {
+      "key": "prompt_id",
+      "value": "1"
+    },
+    {
+      "key": "request_uuid",
+      "value": ""
+    },
+    {
+      "key": "video_id",
+      "value": "1"
     }
   ],
   "item": [
@@ -31,7 +47,13 @@
           "name": "Categories",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/categories",
               "host": [
@@ -50,7 +72,13 @@
           "name": "Random Prompt",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/prompts/random?language={{language}}&category={{category}}",
               "host": [
@@ -73,7 +101,7 @@
                 }
               ]
             },
-            "description": "Fetch one random active prompt by language, optionally filtered by category slug."
+            "description": "Fetch one random active prompt by language, optionally filtered by category slug. Save the `X-Prompt-Request-Id` response header if you want to report the prompt as used or dismissed later."
           },
           "response": []
         },
@@ -81,7 +109,13 @@
           "name": "Prompts By Category",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/prompts/by-category?language={{language}}&category={{category}}",
               "host": [
@@ -112,7 +146,13 @@
           "name": "Search Prompts",
           "request": {
             "method": "GET",
-            "header": [],
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/prompts/search?q={{q}}&language={{language}}",
               "host": [
@@ -134,7 +174,117 @@
                 }
               ]
             },
-            "description": "Search prompts (route exists; implementation may still be pending)."
+            "description": "Search prompts by text, with optional filters like language, category, keyword, exclude_id, and limit."
+          },
+          "response": []
+        },
+        {
+          "name": "Prompt Analytics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/prompts/analytics?language={{language}}&category={{category}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prompts",
+                "analytics"
+              ],
+              "query": [
+                {
+                  "key": "language",
+                  "value": "{{language}}",
+                  "description": "Optional prompt language filter"
+                },
+                {
+                  "key": "category",
+                  "value": "{{category}}",
+                  "description": "Optional category slug filter"
+                }
+              ]
+            },
+            "description": "Get aggregate analytics for prompt requests, uses, dismisses, and top-performing prompts/categories."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Prompt Used",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"used\",\n  \"request_uuid\": \"{{request_uuid}}\",\n  \"video_id\": {{video_id}},\n  \"context\": {\n    \"source\": \"postman\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/prompts/{{prompt_id}}/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prompts",
+                "{{prompt_id}}",
+                "events"
+              ]
+            },
+            "description": "Register that a prompt was used. Reuse the `X-Prompt-Request-Id` response header from a fetch endpoint as `request_uuid` when available."
+          },
+          "response": []
+        },
+        {
+          "name": "Register Prompt Dismissed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-App-Private-Key",
+                "value": "{{app_private_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"dismissed\",\n  \"request_uuid\": \"{{request_uuid}}\",\n  \"context\": {\n    \"source\": \"postman\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/prompts/{{prompt_id}}/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "prompts",
+                "{{prompt_id}}",
+                "events"
+              ]
+            },
+            "description": "Register that a prompt was dismissed."
           },
           "response": []
         }

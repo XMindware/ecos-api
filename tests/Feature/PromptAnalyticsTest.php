@@ -76,6 +76,32 @@ class PromptAnalyticsTest extends TestCase
         ]);
     }
 
+    public function test_feedback_endpoint_registers_dismissed_events(): void
+    {
+        $promptId = $this->createPrompt('travel');
+
+        $response = $this->withAppKey()->postJson("/api/prompts/{$promptId}/events", [
+            'event' => 'dismissed',
+            'request_uuid' => '74d3c8d5-5dfd-47d7-93de-4d75c6332c79',
+            'context' => [
+                'source' => 'mobile-app',
+            ],
+        ]);
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('data.event', 'dismissed')
+            ->assertJsonPath('data.prompt_id', $promptId)
+            ->assertJsonPath('data.context.source', 'mobile-app');
+
+        $this->assertDatabaseHas('prompt_events', [
+            'request_uuid' => '74d3c8d5-5dfd-47d7-93de-4d75c6332c79',
+            'endpoint' => 'feedback',
+            'event' => 'dismissed',
+            'prompt_id' => $promptId,
+        ]);
+    }
+
     public function test_analytics_endpoint_returns_prompt_and_category_usage(): void
     {
         $familyPromptId = $this->createPrompt('family', 'Tell me about a family dinner?');
@@ -135,7 +161,7 @@ class PromptAnalyticsTest extends TestCase
             [
                 'request_uuid' => '22222222-2222-2222-2222-222222222222',
                 'endpoint' => 'feedback',
-                'event' => 'discarded',
+                'event' => 'dismissed',
                 'prompt_id' => $travelPromptId,
                 'filters' => json_encode([]),
                 'context' => json_encode([]),
@@ -151,6 +177,7 @@ class PromptAnalyticsTest extends TestCase
             ->assertJsonPath('summary.request_count', 2)
             ->assertJsonPath('summary.served_count', 2)
             ->assertJsonPath('summary.used_count', 1)
+            ->assertJsonPath('summary.dismissed_count', 1)
             ->assertJsonPath('summary.discarded_count', 1)
             ->assertJsonCount(2, 'top_prompts')
             ->assertJsonCount(2, 'categories');
@@ -162,7 +189,9 @@ class PromptAnalyticsTest extends TestCase
         $this->assertEquals(100.0, $topPrompts[$familyPromptId]['usage_rate']);
 
         $this->assertSame(1, $topPrompts[$travelPromptId]['times_requested']);
+        $this->assertSame(1, $topPrompts[$travelPromptId]['times_dismissed']);
         $this->assertSame(1, $topPrompts[$travelPromptId]['times_discarded']);
+        $this->assertEquals(100.0, $topPrompts[$travelPromptId]['dismiss_rate']);
         $this->assertEquals(100.0, $topPrompts[$travelPromptId]['discard_rate']);
     }
 

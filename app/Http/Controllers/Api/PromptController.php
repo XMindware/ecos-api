@@ -113,11 +113,15 @@ class PromptController extends Controller
     public function registerOutcome(Request $request, Prompt $prompt)
     {
         $validated = $request->validate([
-            'event' => ['required', 'in:used,discarded'],
+            'event' => ['required', 'in:used,dismissed,discarded'],
             'request_uuid' => ['nullable', 'uuid'],
             'video_id' => ['nullable', 'integer'],
             'context' => ['nullable', 'array'],
         ]);
+
+        $eventName = $validated['event'] === 'discarded'
+            ? 'dismissed'
+            : $validated['event'];
 
         $context = array_merge($validated['context'] ?? [], array_filter([
             'video_id' => $validated['video_id'] ?? null,
@@ -127,7 +131,7 @@ class PromptController extends Controller
             $request,
             $validated['request_uuid'] ?? (string) Str::uuid(),
             'feedback',
-            $validated['event'],
+            $eventName,
             $prompt->id,
             [],
             $context
@@ -176,7 +180,7 @@ class PromptController extends Controller
             ->select('prompts.*')
             ->selectSub($this->countEventsSubquery('served', $promptEventBaseQuery), 'times_requested')
             ->selectSub($this->countEventsSubquery('used', $promptEventBaseQuery), 'times_used')
-            ->selectSub($this->countEventsSubquery('discarded', $promptEventBaseQuery), 'times_discarded')
+            ->selectSub($this->countEventsSubquery(['dismissed', 'discarded'], $promptEventBaseQuery), 'times_dismissed')
             ->orderByDesc('times_used')
             ->orderByDesc('times_requested')
             ->limit($limit)
@@ -184,7 +188,7 @@ class PromptController extends Controller
             ->map(function (Prompt $prompt) {
                 $requested = (int) $prompt->times_requested;
                 $used = (int) $prompt->times_used;
-                $discarded = (int) $prompt->times_discarded;
+                $dismissed = (int) $prompt->times_dismissed;
 
                 return [
                     'id' => $prompt->id,
@@ -196,9 +200,11 @@ class PromptController extends Controller
                     'keywords' => $prompt->keywords->pluck('slug')->values(),
                     'times_requested' => $requested,
                     'times_used' => $used,
-                    'times_discarded' => $discarded,
+                    'times_dismissed' => $dismissed,
+                    'times_discarded' => $dismissed,
                     'usage_rate' => $requested > 0 ? round(($used / $requested) * 100, 2) : 0.0,
-                    'discard_rate' => $requested > 0 ? round(($discarded / $requested) * 100, 2) : 0.0,
+                    'dismiss_rate' => $requested > 0 ? round(($dismissed / $requested) * 100, 2) : 0.0,
+                    'discard_rate' => $requested > 0 ? round(($dismissed / $requested) * 100, 2) : 0.0,
                 ];
             })
             ->values();
@@ -209,7 +215,7 @@ class PromptController extends Controller
                 $first = $prompts->first();
                 $requested = $prompts->sum('times_requested');
                 $used = $prompts->sum('times_used');
-                $discarded = $prompts->sum('times_discarded');
+                $dismissed = $prompts->sum('times_dismissed');
 
                 return [
                     'id' => $first['category']['id'] ?? null,
@@ -218,9 +224,11 @@ class PromptController extends Controller
                     'prompt_count' => $prompts->count(),
                     'times_requested' => $requested,
                     'times_used' => $used,
-                    'times_discarded' => $discarded,
+                    'times_dismissed' => $dismissed,
+                    'times_discarded' => $dismissed,
                     'usage_rate' => $requested > 0 ? round(($used / $requested) * 100, 2) : 0.0,
-                    'discard_rate' => $requested > 0 ? round(($discarded / $requested) * 100, 2) : 0.0,
+                    'dismiss_rate' => $requested > 0 ? round(($dismissed / $requested) * 100, 2) : 0.0,
+                    'discard_rate' => $requested > 0 ? round(($dismissed / $requested) * 100, 2) : 0.0,
                 ];
             })
             ->sortByDesc('times_used')
@@ -231,7 +239,8 @@ class PromptController extends Controller
                 'request_count' => (clone $requestEventBaseQuery)->where('event', 'requested')->count(),
                 'served_count' => (clone $promptEventBaseQuery)->where('event', 'served')->count(),
                 'used_count' => (clone $promptEventBaseQuery)->where('event', 'used')->count(),
-                'discarded_count' => (clone $promptEventBaseQuery)->where('event', 'discarded')->count(),
+                'dismissed_count' => $this->countEvents($promptEventBaseQuery, ['dismissed', 'discarded']),
+                'discarded_count' => $this->countEvents($promptEventBaseQuery, ['dismissed', 'discarded']),
                 'no_result_count' => (clone $requestEventBaseQuery)->where('event', 'no_results')->count(),
             ],
             'top_prompts' => $promptAnalytics,
@@ -364,13 +373,20 @@ class PromptController extends Controller
         ]);
     }
 
-    protected function countEventsSubquery(string $event, Builder $eventBaseQuery): \Illuminate\Database\Query\Builder
+    protected function countEventsSubquery(string|array $events, Builder $eventBaseQuery): \Illuminate\Database\Query\Builder
     {
+        $events = (array) $events;
+
         return (clone $eventBaseQuery)
             ->toBase()
             ->selectRaw('COUNT(*)')
             ->whereColumn('prompt_events.prompt_id', 'prompts.id')
-            ->where('prompt_events.event', $event);
+            ->whereIn('prompt_events.event', $events);
+    }
+
+    protected function countEvents(Builder $query, array $events): int
+    {
+        return (clone $query)->whereIn('event', $events)->count();
     }
 
     protected function applyDateRange(Builder $query, array $validated): Builder
